@@ -1,9 +1,8 @@
 /*
 ** An FTS5 tokenizer named "jieba", plus a jieba_cut() scalar function.
 **
-** Only the SQLite plumbing lives here: fts5_api is reachable only from inside a
-** loadable extension, via SELECT fts5(?1) + sqlite3_bind_pointer. Segmentation
-** itself is in Rust (src/segment.rs).
+** Only the SQLite plumbing lives here, because fts5_api is reachable only from
+** inside a loadable extension. Segmentation is in Rust (src/segment.rs).
 */
 #include "sqlite3ext.h"
 #include "fts5.h"
@@ -24,8 +23,7 @@ static int jiebaCreate(void *pUnused, const char **azArg, int nArg,
   (void)pUnused;
   (void)azArg;
   (void)nArg;
-  /* Stateless: the dictionary lives in a process-wide OnceLock on the Rust
-  ** side, so the handle only has to be non-NULL. */
+  /* Stateless, so the handle only has to be non-NULL. */
   *ppOut = (Fts5Tokenizer *)ppOut;
   return SQLITE_OK;
 }
@@ -37,8 +35,8 @@ static int jiebaTokenize(Fts5Tokenizer *pTokenizer, void *pCtx, int flags,
                          int (*xToken)(void *, int, const char *, int, int,
                                        int)) {
   (void)pTokenizer;
-  /* Documents and queries take the same path: matching positions on both sides
-  ** is what keeps phrases and colocated alternatives lining up. */
+  /* Documents and queries take the same path, which is what keeps their
+  ** positions lined up. */
   (void)flags;
   if (nText <= 0 || pText == 0) return SQLITE_OK;
   return sqlite3_jieba_tokenize(pText, nText, pCtx, xToken);
@@ -80,9 +78,7 @@ static fts5_api *jiebaFts5Api(sqlite3 *db) {
   return pRet;
 }
 
-/* Re-exported as sqlite3_jieba_init by src/lib.rs — routing the entry point
-** through Rust is what keeps the linker from dropping this object file out of
-** the cdylib, and gives Dart a #[no_mangle] symbol to take the address of. */
+/* Re-exported as sqlite3_jieba_init by src/lib.rs. */
 int sqlite3_jieba_init_impl(sqlite3 *db, char **pzErrMsg,
                             const sqlite3_api_routines *pApi) {
   static fts5_tokenizer tokenizer = {jiebaCreate, jiebaDelete, jiebaTokenize};

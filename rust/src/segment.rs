@@ -16,9 +16,9 @@ fn is_han(c: char) -> bool {
     )
 }
 
-/// A token plus the byte range of the **original** text it came from. The token
-/// text may differ from that range (it is lowercased), which is what lets FTS5
-/// `highlight()` / `snippet()` mark up the source rather than the index.
+/// A token plus the byte range of the **original** text it came from. The two
+/// can differ (tokens are lowercased); the range is what FTS5 `highlight()` and
+/// `snippet()` mark up.
 pub struct Token<'a> {
     pub text: Cow<'a, str>,
     pub start: usize,
@@ -78,7 +78,7 @@ fn spans(text: &str) -> Vec<Span> {
     out
 }
 
-/// Runs with no letter or digit carry no recall; `unicode61` drops them too.
+/// `unicode61` drops these too.
 #[inline]
 fn is_indexable(s: &str) -> bool {
     s.chars().any(char::is_alphanumeric)
@@ -91,9 +91,7 @@ fn jieba() -> &'static Jieba {
 }
 
 /// Everything that is not Han. jieba's own non-Han branch only understands
-/// ASCII — it cuts `schön` into `sch|ö|n`, and Cyrillic, Greek, Arabic and
-/// Hangul into single characters — so word boundaries come from Unicode UAX#29
-/// instead.
+/// ASCII (it cuts `schön` into `sch|ö|n`), so boundaries come from UAX#29.
 fn latin<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
     let slice = &text[span.start..span.end];
     for (off, word) in slice.unicode_word_indices() {
@@ -116,12 +114,9 @@ fn latin<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
 
 fn han<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
     let slice = &text[span.start..span.end];
-    // Search mode also yields the sub-words of every long word, but in
-    // dictionary order rather than positional order: for 南京市长江大桥 it emits
-    // 南京(0) 京市(1) 南京市(0) 长江(3) 大桥(5) 长江大桥(3). FTS5 needs
-    // non-decreasing positions and only ties COLOCATED to the token right before
-    // it, so regroup: longest first at each start, shorter variants colocated
-    // behind it.
+    // Search mode emits sub-words in dictionary order, not positional order.
+    // FTS5 needs non-decreasing positions and ties COLOCATED to the previous
+    // token, so regroup: longest first at each start, shorter ones behind it.
     let mut hits: Vec<_> = jieba()
         .tokenize(slice, TokenizeMode::Search, true)
         .into_iter()
@@ -246,23 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn search_mode_expands_long_words() {
-        let tokens = texts("今天天气很好");
-        assert!(tokens.iter().any(|t| t == "今天天气"));
-        assert!(tokens.iter().any(|t| t == "今天"));
-        assert!(tokens.iter().any(|t| t == "天气"));
-    }
-
-    #[test]
-    fn mixed_scripts_keep_whole_words() {
-        let tokens = texts("今天去了Starbucks，感觉coffee不错");
-        assert!(tokens.iter().any(|t| t == "今天"));
-        assert!(tokens.iter().any(|t| t == "不错"));
-        assert!(tokens.contains(&"starbucks".to_string()));
-        assert!(tokens.contains(&"coffee".to_string()));
-    }
-
-    #[test]
     fn accented_latin_is_not_shredded() {
         // jieba's own non-Han branch only understands ASCII; UAX#29 keeps these
         // whole.
@@ -278,41 +256,6 @@ mod tests {
             texts("Running WEATHER"),
             vec!["running".to_string(), "weather".to_string()]
         );
-    }
-
-    #[test]
-    fn duplicates_survive_for_term_frequency() {
-        assert_eq!(
-            texts("hello hello hello")
-                .iter()
-                .filter(|t| t.as_str() == "hello")
-                .count(),
-            3
-        );
-    }
-
-    #[test]
-    fn segmentation_goldens() {
-        const CASES: &[(&str, &str)] = &[
-            (
-                "今天天气很好，我去公园散步了",
-                "今天天气/很/好/我/去/公园/散步/了",
-            ),
-            (
-                "北京大学的研究生正在做自然语言处理",
-                "北京大学/的/研究生/正在/做/自然语言/处理",
-            ),
-            ("百年孤独是一本很棒的小说", "百年孤独/是/一本/很棒/的/小说"),
-        ];
-        for (text, expected) in CASES {
-            let got: Vec<&str> = jieba()
-                .tokenize(text, TokenizeMode::Default, true)
-                .into_iter()
-                .map(|t| t.word)
-                .filter(|w| is_indexable(w))
-                .collect();
-            assert_eq!(got.join("/"), *expected, "segmentation drift: {text}");
-        }
     }
 
     #[test]

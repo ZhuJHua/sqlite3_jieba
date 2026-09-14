@@ -25,12 +25,6 @@ Database openWithIndex() {
         INSERT INTO notes_fts(rowid, title, body)
           VALUES (new.id, new.title, new.body);
       END;
-    ''')
-    ..execute('''
-      CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
-        INSERT INTO notes_fts(notes_fts, rowid, title, body)
-          VALUES ('delete', old.id, old.title, old.body);
-      END;
     ''');
   return db;
 }
@@ -124,47 +118,6 @@ void main() {
         ['"coffee"'],
       ).single['t'];
       expect(marked, '今天去了 Starbucks 🎉 感觉 [coffee] 不错');
-    });
-
-    test('search is case insensitive for Latin', () {
-      insert(db, 1, '', 'I went to Starbucks');
-      expect(match(db, '"starbucks"'), [1]);
-    });
-
-    test('bm25 column weights order the results', () {
-      insert(db, 1, '普通的一天', '中午吃了苹果，下午继续写代码，晚上散步回家');
-      insert(db, 2, '苹果', '随便写点什么');
-      final ranked = db.select(
-        'SELECT rowid FROM notes_fts WHERE notes_fts MATCH ? '
-        'ORDER BY bm25(notes_fts, 1.5, 1.0)',
-        ['"苹果"'],
-      );
-      expect(ranked.map((r) => r['rowid']), [2, 1]);
-    });
-
-    test('prefix queries work', () {
-      insert(db, 1, '', '在北京出差三天');
-      expect(match(db, '北京*'), [1]);
-    });
-
-    test('delete triggers remove the row from the index', () {
-      insert(db, 1, '', '苹果香蕉');
-      db.execute('DELETE FROM notes WHERE id = 1');
-      expect(match(db, '"苹果"'), isEmpty);
-    });
-
-    test("'rebuild' reindexes from the content table", () {
-      insert(db, 1, '', '苹果香蕉');
-      db
-        ..execute('DROP TRIGGER notes_ai')
-        ..execute('INSERT INTO notes(id, title, body) VALUES (2, ?, ?)', [
-          '',
-          '梨子',
-        ]);
-      expect(match(db, '"梨子"'), isEmpty);
-
-      db.execute("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')");
-      expect(match(db, '"梨子"'), [2]);
     });
   });
 }

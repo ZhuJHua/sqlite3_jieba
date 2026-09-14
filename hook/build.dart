@@ -8,8 +8,8 @@ void main(List<String> args) async {
     if (!input.config.buildCodeAssets) return;
     final code = input.config.code;
     // hooks run with an environment allowlist, so *_DEPLOYMENT_TARGET never
-    // reaches them. Without this, rustc links against its default triple
-    // (iOS 10.0) and fails on ___chkstk_darwin with recent Xcode SDKs.
+    // reaches them; without it rustc links against iOS 10.0 and fails on
+    // ___chkstk_darwin with recent Xcode SDKs.
     final env = switch (code.targetOS) {
       OS.iOS => {'IPHONEOS_DEPLOYMENT_TARGET': '${code.iOS.targetVersion}.0'},
       OS.macOS => {'MACOSX_DEPLOYMENT_TARGET': '${code.macOS.targetVersion}.0'},
@@ -21,7 +21,7 @@ void main(List<String> args) async {
       extraCargoEnvironmentVariables: env,
     ).run(input: input, output: output);
     // native_toolchain_rust does not track these, so the hook would otherwise
-    // reuse a stale library after they change.
+    // reuse a stale library.
     output.dependencies.addAll([
       input.packageRoot.resolve('rust/Cargo.toml'),
       input.packageRoot.resolve('rust/Cargo.lock'),

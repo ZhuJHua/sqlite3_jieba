@@ -22,9 +22,8 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-/// The extension entry point. It only forwards to the C shim, but being a Rust
-/// `#[no_mangle]` symbol is what pulls the shim's object file into the cdylib
-/// and gives Dart a symbol to take the address of.
+/// The extension entry point. Forwarding through Rust is what keeps the linker
+/// from dropping the C shim out of the cdylib.
 ///
 /// # Safety
 /// Called by SQLite with a live `sqlite3*` and api-routines table.
@@ -54,8 +53,7 @@ pub unsafe extern "C" fn sqlite3_jieba_tokenize(
     ctx: *mut c_void,
     emit: EmitFn,
 ) -> c_int {
-    // Non-UTF-8 input cannot be segmented; indexing nothing beats failing the
-    // write that carried it.
+    // Indexing nothing beats failing the write that carried the bad bytes.
     let Some(text) = (unsafe { borrow_utf8(text, n_text) }) else {
         return SQLITE_OK;
     };
