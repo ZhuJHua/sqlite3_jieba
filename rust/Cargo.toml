@@ -1,0 +1,26 @@
+[package]
+name = "sqlite3-jieba"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A jieba-backed FTS5 tokenizer for SQLite, built as a loadable extension."
+repository = "https://github.com/ZhuJHua/sqlite3_jieba"
+
+[lib]
+# Renaming breaks things: native_toolchain_rust names the output file after
+# lib.name, and the Dart side looks the library up by the same stem.
+name = "sqlite3_jieba"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+jieba-rs = { version = "=0.10.3", default-features = false, features = ["default-dict"] }
+unicode-segmentation = "=1.13.3"
+
+[build-dependencies]
+cc = "=1.2.42"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

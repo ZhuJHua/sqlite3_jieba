@@ -1,0 +1,24 @@
+name: sqlite3_jieba
+description: "A jieba-backed FTS5 tokenizer for SQLite, shipped as a native asset. Adds a `jieba` tokenizer and a `jieba_cut()` function to package:sqlite3."
+version: 0.1.0
+repository: https://github.com/ZhuJHua/sqlite3_jieba
+issue_tracker: https://github.com/ZhuJHua/sqlite3_jieba/issues
+topics:
+  - sqlite
+  - fts5
+  - full-text-search
+  - chinese
+  - tokenizer
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  code_assets: ^1.2.1
+  hooks: ^2.2.0
+  native_toolchain_rust: ^1.0.6
+  sqlite3: ^3.5.2
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.0
