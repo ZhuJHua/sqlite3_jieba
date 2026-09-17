@@ -1,6 +1,6 @@
 [package]
 name = "sqlite3-jieba"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
 description = "A jieba-backed FTS5 tokenizer for SQLite, built as a loadable extension."
@@ -10,7 +10,9 @@ repository = "https://github.com/ZhuJHua/sqlite3_jieba"
 # Renaming breaks things: native_toolchain_rust names the output file after
 # lib.name, and the Dart side looks the library up by the same stem.
 name = "sqlite3_jieba"
-crate-type = ["cdylib", "staticlib"]
+# Only cdylib is shipped, but native_toolchain_rust refuses to build unless
+# staticlib is listed too.
+crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 jieba-rs = { version = "=0.10.3", default-features = false, features = ["default-dict"] }

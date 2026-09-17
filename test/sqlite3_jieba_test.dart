@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:sqlite3/sqlite3.dart';
 import 'package:sqlite3_jieba/sqlite3_jieba.dart';
@@ -39,13 +40,12 @@ List<int> match(Database db, String query) => db
     .map((r) => r['rowid'] as int)
     .toList();
 
-List<String> cut(Database db, String text) =>
-    (json.decode(
-              db.select('SELECT jieba_cut(?) AS t', [text]).single['t']
-                  as String,
-            )
-            as List)
-        .cast<String>();
+List<String> cut(Database db, String text, [String? options]) {
+  final row = options == null
+      ? db.select('SELECT jieba_cut(?) AS t', [text])
+      : db.select('SELECT jieba_cut(?, ?) AS t', [text, options]);
+  return (json.decode(row.single['t'] as String) as List).cast<String>();
+}
 
 void main() {
   setUpAll(loadJiebaTokenizer);
@@ -77,6 +77,92 @@ void main() {
         ),
         isEmpty,
       );
+    });
+  });
+
+  group('jieba_version', () {
+    test('matches the version pub ships', () {
+      final db = sqlite3.openInMemory();
+      addTearDown(db.close);
+      final reported = db.select('SELECT jieba_version() AS v').single['v'];
+      final declared = RegExp(
+        r'^version:\s*(\S+)',
+        multiLine: true,
+      ).firstMatch(File('pubspec.yaml').readAsStringSync())!.group(1);
+      expect(
+        reported,
+        declared,
+        reason: 'the Rust crate version and pubspec version have drifted',
+      );
+    });
+  });
+
+  group('locale-aware tables', () {
+    test('a locale=1 table indexes and matches', () {
+      // fts5_locale() needs fts5_api.iVersion >= 3, which is also what selects
+      // the v2 tokenizer registration in the shim.
+      if (sqlite3.version.versionNumber < 3047000) {
+        markTestSkipped(
+          'SQLite ${sqlite3.version.libVersion} predates fts5 v2',
+        );
+        return;
+      }
+      final db = sqlite3.openInMemory();
+      addTearDown(db.close);
+      db
+        ..execute(
+          "CREATE VIRTUAL TABLE t USING fts5(a, tokenize='jieba', locale=1)",
+        )
+        ..execute("INSERT INTO t(a) VALUES (fts5_locale('zh_CN', ?))", [
+          '今天天气很好',
+        ]);
+      expect(
+        db.select('SELECT rowid FROM t WHERE t MATCH ?', ['"天气"']),
+        hasLength(1),
+      );
+    });
+  });
+
+  group('tokenizer options', () {
+    late Database db;
+    setUp(() => db = sqlite3.openInMemory());
+    tearDown(() => db.close());
+
+    test('search 0 indexes only the long word', () {
+      expect(cut(db, '南京市长江大桥'), contains('南京'));
+      expect(cut(db, '南京市长江大桥', 'search 0'), ['南京市', '长江大桥']);
+    });
+
+    test('rejects unknown options', () {
+      expect(
+        () => db.execute(
+          "CREATE VIRTUAL TABLE t USING fts5(a, tokenize='jieba nope 1')",
+        ),
+        throwsA(isA<SqliteException>()),
+      );
+      expect(
+        () => db.execute(
+          "CREATE VIRTUAL TABLE t USING fts5(a, tokenize='jieba search')",
+        ),
+        throwsA(isA<SqliteException>()),
+      );
+      expect(() => cut(db, '公园', 'nope 1'), throwsA(isA<SqliteException>()));
+    });
+
+    test('a table built with search 0 does not match sub-words', () {
+      db
+        ..execute(
+          "CREATE VIRTUAL TABLE t USING fts5(a, tokenize='jieba search 0')",
+        )
+        ..execute('INSERT INTO t(a) VALUES (?)', ['南京市长江大桥']);
+
+      List<Object?> hits(String q) => db
+          .select('SELECT rowid FROM t WHERE t MATCH ?', [q])
+          .map((r) => r['rowid'])
+          .toList();
+
+      expect(hits('"长江大桥"'), [1]);
+      expect(hits('"长江"'), isEmpty);
     });
   });
 

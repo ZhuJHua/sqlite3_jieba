@@ -3,6 +3,46 @@ use std::borrow::Cow;
 use std::sync::OnceLock;
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Tokenizer options, mirrored by the `JIEBA_OPT_*` bits in `c/shim.c`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Options {
+    /// HMM new-word discovery for runs the dictionary does not cover.
+    pub hmm: bool,
+    /// Emit dictionary sub-words alongside the long word, colocated. Off, only
+    /// the long word is indexed: a smaller index that cannot match sub-words.
+    pub search: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            hmm: true,
+            search: true,
+        }
+    }
+}
+
+impl Options {
+    const HMM: i32 = 0x0001;
+    const SEARCH: i32 = 0x0002;
+
+    /// Decodes the bitmask the C shim passes across the ABI.
+    pub fn from_bits(bits: i32) -> Self {
+        Self {
+            hmm: bits & Self::HMM != 0,
+            search: bits & Self::SEARCH != 0,
+        }
+    }
+
+    fn mode(self) -> TokenizeMode {
+        if self.search {
+            TokenizeMode::Search
+        } else {
+            TokenizeMode::Default
+        }
+    }
+}
+
 #[inline]
 fn is_han(c: char) -> bool {
     matches!(c,
@@ -112,13 +152,13 @@ fn latin<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
     }
 }
 
-fn han<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
+fn han<'a>(text: &'a str, span: &Span, opts: Options, out: &mut Vec<Token<'a>>) {
     let slice = &text[span.start..span.end];
     // Search mode emits sub-words in dictionary order, not positional order.
     // FTS5 needs non-decreasing positions and ties COLOCATED to the previous
     // token, so regroup: longest first at each start, shorter ones behind it.
     let mut hits: Vec<_> = jieba()
-        .tokenize(slice, TokenizeMode::Search, true)
+        .tokenize(slice, opts.mode(), opts.hmm)
         .into_iter()
         .filter(|t| is_indexable(t.word))
         .collect();
@@ -142,11 +182,11 @@ fn han<'a>(text: &'a str, span: &Span, out: &mut Vec<Token<'a>>) {
 }
 
 /// Tokens in order of occurrence, byte offsets into `text`.
-pub fn tokenize(text: &str) -> Vec<Token<'_>> {
+pub fn tokenize(text: &str, opts: Options) -> Vec<Token<'_>> {
     let mut out = Vec::new();
     for span in spans(text) {
         if span.han {
-            han(text, &span, &mut out);
+            han(text, &span, opts, &mut out);
         } else {
             latin(text, &span, &mut out);
         }
@@ -157,10 +197,10 @@ pub fn tokenize(text: &str) -> Vec<Token<'_>> {
 /// Distinct token texts, first occurrence first. Meant for building a `MATCH`
 /// string, so that query terms come from the vocabulary the index was built
 /// with.
-pub fn distinct_tokens(text: &str) -> Vec<String> {
+pub fn distinct_tokens(text: &str, opts: Options) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for token in tokenize(text) {
+    for token in tokenize(text, opts) {
         if seen.insert(token.text.to_string()) {
             out.push(token.text.into_owned());
         }
@@ -171,6 +211,10 @@ pub fn distinct_tokens(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tokenize(text: &str) -> Vec<Token<'_>> {
+        super::tokenize(text, Options::default())
+    }
 
     fn texts(text: &str) -> Vec<String> {
         tokenize(text)
@@ -266,9 +310,38 @@ mod tests {
     }
 
     #[test]
+    fn search_off_indexes_only_the_long_word() {
+        let opts = Options {
+            search: false,
+            ..Options::default()
+        };
+        let tokens = super::tokenize("南京市长江大桥", opts);
+        assert!(
+            tokens.iter().all(|t| !t.colocated),
+            "sub-words are what colocation is for"
+        );
+        assert_eq!(
+            tokens.iter().map(|t| t.text.as_ref()).collect::<Vec<_>>(),
+            vec!["南京市", "长江大桥"]
+        );
+    }
+
+    #[test]
+    fn options_round_trip_through_the_abi() {
+        assert_eq!(Options::from_bits(0x3), Options::default());
+        assert_eq!(
+            Options::from_bits(0),
+            Options {
+                hmm: false,
+                search: false
+            }
+        );
+    }
+
+    #[test]
     fn distinct_tokens_dedup_in_order() {
         assert_eq!(
-            distinct_tokens("苹果 苹果 香蕉"),
+            distinct_tokens("苹果 苹果 香蕉", Options::default()),
             vec!["苹果".to_string(), "香蕉".to_string()]
         );
     }

@@ -45,11 +45,13 @@ unsafe fn borrow_utf8<'a>(text: *const c_char, len: c_int) -> Option<&'a str> {
 }
 
 /// # Safety
-/// `text` must point at `n_text` bytes; `emit` is FTS5's `xToken`.
+/// `text` must point at `n_text` bytes; `emit` is FTS5's `xToken`. `opts` is a
+/// mask of the `JIEBA_OPT_*` bits from `c/shim.c`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn sqlite3_jieba_tokenize(
     text: *const c_char,
     n_text: c_int,
+    opts: c_int,
     ctx: *mut c_void,
     emit: EmitFn,
 ) -> c_int {
@@ -57,7 +59,7 @@ pub unsafe extern "C" fn sqlite3_jieba_tokenize(
     let Some(text) = (unsafe { borrow_utf8(text, n_text) }) else {
         return SQLITE_OK;
     };
-    for token in segment::tokenize(text) {
+    for token in segment::tokenize(text, segment::Options::from_bits(opts)) {
         let flags = if token.colocated {
             FTS5_TOKEN_COLOCATED
         } else {
@@ -108,15 +110,27 @@ fn json_array(tokens: &[String]) -> String {
 /// `text` must point at `n_text` bytes. The result must be released with
 /// [`sqlite3_jieba_free_json`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn sqlite3_jieba_cut_json(text: *const c_char, n_text: c_int) -> *mut c_char {
+pub unsafe extern "C" fn sqlite3_jieba_cut_json(
+    text: *const c_char,
+    n_text: c_int,
+    opts: c_int,
+) -> *mut c_char {
     let tokens = match unsafe { borrow_utf8(text, n_text) } {
-        Some(text) => segment::distinct_tokens(text),
+        Some(text) => segment::distinct_tokens(text, segment::Options::from_bits(opts)),
         None => Vec::new(),
     };
     match CString::new(json_array(&tokens)) {
         Ok(json) => json.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// This extension's version, as a static NUL-terminated string. Surfaced to SQL
+/// as `jieba_version()`.
+#[unsafe(no_mangle)]
+pub extern "C" fn sqlite3_jieba_version() -> *const c_char {
+    const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION.as_ptr().cast()
 }
 
 /// # Safety
