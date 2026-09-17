@@ -1,0 +1,166 @@
+name: Release
+
+# Builds the cdylib for every target in rust/rust-toolchain.toml and attaches
+# them to the GitHub release, so consumers of the package do not need rustup.
+# See RELEASING.md for the order of operations.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and attach artifacts to'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # Baked into the Apple and Android artifacts and recorded in the manifest.
+  # The build hook falls back to compiling from source for anything older.
+  IOS_DEPLOYMENT_TARGET: '12.0'
+  MACOS_DEPLOYMENT_TARGET: '10.14'
+  ANDROID_API: '21'
+
+jobs:
+  apple:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {key: macos_arm64, target: aarch64-apple-darwin, ext: dylib}
+          - {key: macos_x64, target: x86_64-apple-darwin, ext: dylib}
+          - {key: ios_arm64, target: aarch64-apple-ios, ext: dylib}
+          - {key: ios_sim_arm64, target: aarch64-apple-ios-sim, ext: dylib}
+          - {key: ios_sim_x64, target: x86_64-apple-ios, ext: dylib}
+    steps:
+      - uses: actions/checkout@v5
+        with: {ref: '${{ inputs.tag || github.ref }}'}
+      - run: rustup show
+        working-directory: rust
+      - name: Build
+        working-directory: rust
+        run: |
+          if [[ "${{ matrix.target }}" == *apple-darwin ]]; then
+            export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+          else
+            export IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+          fi
+          cargo build --release --target ${{ matrix.target }}
+      - name: Stage
+        run: |
+          mkdir -p dist
+          cp rust/target/${{ matrix.target }}/release/libsqlite3_jieba.${{ matrix.ext }} \
+             dist/sqlite3_jieba-${{ matrix.key }}.${{ matrix.ext }}
+      - uses: actions/upload-artifact@v4
+        with: {name: '${{ matrix.key }}', path: dist/}
+
+  android:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {key: android_arm64, target: aarch64-linux-android, abi: arm64-v8a}
+          - {key: android_arm, target: armv7-linux-androideabi, abi: armeabi-v7a}
+          - {key: android_x64, target: x86_64-linux-android, abi: x86_64}
+    steps:
+      - uses: actions/checkout@v5
+        with: {ref: '${{ inputs.tag || github.ref }}'}
+      - run: rustup show
+        working-directory: rust
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with: {ndk-version: r27c}
+      - run: cargo install cargo-ndk --locked
+      - name: Build
+        working-directory: rust
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: cargo ndk -t ${{ matrix.abi }} -p "$ANDROID_API" -- build --release
+      - name: Stage
+        run: |
+          mkdir -p dist
+          cp rust/target/${{ matrix.target }}/release/libsqlite3_jieba.so \
+             dist/sqlite3_jieba-${{ matrix.key }}.so
+      - uses: actions/upload-artifact@v4
+        with: {name: '${{ matrix.key }}', path: dist/}
+
+  linux:
+    # Deliberately older than ubuntu-latest: the glibc the artifact is linked
+    # against is the floor for every machine that loads it.
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {key: linux_x64, target: x86_64-unknown-linux-gnu, cross: false}
+          - {key: linux_arm64, target: aarch64-unknown-linux-gnu, cross: true}
+    steps:
+      - uses: actions/checkout@v5
+        with: {ref: '${{ inputs.tag || github.ref }}'}
+      - run: rustup show
+        working-directory: rust
+      - if: matrix.cross
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        working-directory: rust
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage
+        run: |
+          mkdir -p dist
+          cp rust/target/${{ matrix.target }}/release/libsqlite3_jieba.so \
+             dist/sqlite3_jieba-${{ matrix.key }}.so
+      - uses: actions/upload-artifact@v4
+        with: {name: '${{ matrix.key }}', path: dist/}
+
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {key: windows_x64, target: x86_64-pc-windows-msvc}
+          - {key: windows_arm64, target: aarch64-pc-windows-msvc}
+    steps:
+      - uses: actions/checkout@v5
+        with: {ref: '${{ inputs.tag || github.ref }}'}
+      - run: rustup show
+        working-directory: rust
+      - run: cargo build --release --target ${{ matrix.target }}
+        working-directory: rust
+      - name: Stage
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp rust/target/${{ matrix.target }}/release/sqlite3_jieba.dll \
+             dist/sqlite3_jieba-${{ matrix.key }}.dll
+      - uses: actions/upload-artifact@v4
+        with: {name: '${{ matrix.key }}', path: dist/}
+
+  release:
+    needs: [apple, android, linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: {ref: '${{ inputs.tag || github.ref }}'}
+      - uses: actions/download-artifact@v4
+        with: {path: staging}
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find staging -type f -name 'sqlite3_jieba-*' -exec mv {} dist/ \;
+          cd dist
+          # tool/update_prebuilt.dart reads this file to build hook/prebuilt.json.
+          sha256sum sqlite3_jieba-* | tee SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 12
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: true
