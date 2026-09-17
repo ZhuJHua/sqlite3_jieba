@@ -74,12 +74,17 @@ jobs:
       - uses: nttld/setup-ndk@v1
         id: ndk
         with: {ndk-version: r27c}
-      - run: cargo install cargo-ndk --locked
+      # Pinned: cargo-ndk renamed the API-level flag between 3.x and 4.x, and
+      # an unpinned install picks up the next such change silently.
+      - run: cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build
         working-directory: rust
         env:
+          # cargo-ndk warns when these two disagree, and the runner image
+          # presets ANDROID_NDK_ROOT to its own NDK.
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
-        run: cargo ndk -t ${{ matrix.abi }} -p "$ANDROID_API" -- build --release
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+        run: cargo ndk -t ${{ matrix.abi }} --platform "$ANDROID_API" -- build --release
       - name: Stage
         run: |
           mkdir -p dist
