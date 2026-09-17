@@ -1,6 +1,6 @@
 name: sqlite3_jieba
 description: "A jieba-backed FTS5 tokenizer for SQLite, shipped as a native asset. Adds a `jieba` tokenizer and a `jieba_cut()` function to package:sqlite3."
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/ZhuJHua/sqlite3_jieba
 issue_tracker: https://github.com/ZhuJHua/sqlite3_jieba/issues
 topics:

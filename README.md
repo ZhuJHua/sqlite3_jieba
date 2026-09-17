@@ -15,7 +15,7 @@ CREATE VIRTUAL TABLE notes USING fts5(title, body, tokenize='jieba');
 
 ```yaml
 dependencies:
-  sqlite3_jieba: ^0.2.0
+  sqlite3_jieba: ^0.2.1
 ```
 
 A build hook fetches the native library for your target from the GitHub release and checks it

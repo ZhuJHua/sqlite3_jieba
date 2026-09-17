@@ -1,4 +1,4 @@
-## 0.2.0
+## 0.2.1
 
 - The build hook now fetches a prebuilt native library for the target from the GitHub release and
   checks it against a SHA-256 shipped with the package. `rustup` is needed only when it falls back
